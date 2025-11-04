@@ -1,0 +1,26 @@
+# Build / CMake
+/build/
+/out/
+/install/
+/CMakeFiles/
+/CMakeCache.txt
+cmake-build-*/
+
+# VS/VS Code
+.vscode/
+.vs/
+*.VC.db
+*.VC.opendb
+
+# Binaries
+*.exe
+*.pdb
+*.dll
+*.lib
+*.obj
+*.ipdb
+*.iobj
+
+# Logs
+*.log
+vpn-service.log
