@@ -1,26 +1,28 @@
-# Build / CMake
+@'
+# CMake / build
 /build/
 /out/
 /install/
 /CMakeFiles/
 /CMakeCache.txt
 cmake-build-*/
+**/Debug/
+**/Release/
 
-# VS/VS Code
-.vscode/
+# VS / VS Code
 .vs/
+.vscode/
 *.VC.db
 *.VC.opendb
 
-# Binaries
+# Binaries / intermediates
 *.exe
-*.pdb
 *.dll
 *.lib
+*.pdb
 *.obj
-*.ipdb
 *.iobj
-
-# Logs
+*.ipdb
 *.log
 vpn-service.log
+'@ | Out-File -Encoding utf8 .gitignore
