@@ -1,0 +1,16 @@
+name: Windows CMake Build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (Ninja)
+        run: cmake -S . -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build -j
