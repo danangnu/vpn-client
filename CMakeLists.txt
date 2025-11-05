@@ -80,8 +80,8 @@ add_executable(svcctl tools/svcctl.cpp)
 target_link_libraries(svcctl PRIVATE advapi32.lib)
 
 # Tiny pipe test client
-if (EXISTS "${CMAKE_SOURCE_DIR}/tools/test_ipc.cpp")
-  add_executable(test_ipc tools/test_ipc.cpp)
+if (EXISTS "${CMAKE_SOURCE_DIR}/tools/vpnctl.cpp")
+  add_executable(vpnctl tools/vpnctl.cpp)
 endif()
 
 # --- Nice-to-have: show a summary -------------------------------------------
