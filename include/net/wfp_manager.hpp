@@ -1,29 +1,40 @@
 ﻿#pragma once
-#include <string>
+// Winsock must come before windows.h
+#include <winsock2.h>
+#include <ws2def.h>
+#include <ws2ipdef.h>
+#include <windows.h>
+
+// WFP types
+#include <fwptypes.h>
+
+#include <cstdint>
 #include <optional>
-#include <vector>   // <-- needed for std::vector
+#include <string>
+#include <vector>
 
 namespace net {
-    struct KillSwitchAllow {
-        std::wstring remoteHost;
-        std::optional<unsigned short> remotePort;
-        int ipVersion = 4;     // 4 or 6
-        int protocol = 17;    // IPPROTO_UDP by default
-    };
+  struct KillSwitchAllow {
+    std::wstring             remoteHostOrIp;
+    std::optional<uint16_t>  remotePort;
+    int                      ipVersion = 4;             // 4 or 6
+    int                      protocol  = IPPROTO_UDP;   // needs winsock headers
+  };
 
-    class WfpManager {
-    public:
-        bool init() { return true; }
-        bool enableKillSwitch(const std::wstring& tunnelLuid,
-            const std::vector<KillSwitchAllow>& allow) {
-            return true;
-        }
-        bool disableKillSwitch() { return true; }
-    };
+  class WfpManager {
+  public:
+    bool init();
+    bool enableKillSwitch(const std::vector<KillSwitchAllow>& allow);
+    bool disableKillSwitch();
 
-    bool setDefaultRouteToInterface(const std::wstring& ifName);
-    bool revertRoutes();
-    bool setDnsServersForInterface(const std::wstring& ifName,
-        const std::vector<std::wstring>& servers);
-    bool revertDns(const std::wstring& ifName);
+  private:
+    bool addSublayer();
+    bool addBlockAll();
+    bool addAllowRules(const std::vector<KillSwitchAllow>& allow);
+    void clearAll();
+
+    HANDLE engine_ = nullptr;
+    GUID   sublayerId_{};
+    std::vector<UINT64> filterIds_;
+  };
 }

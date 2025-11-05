@@ -1,94 +1,114 @@
-cmake_minimum_required(VERSION 3.24)
-project(VpnClient LANGUAGES CXX VERSION 0.1.0)
+cmake_minimum_required(VERSION 3.25)
+project(vpn-client LANGUAGES CXX)
 
-# --- C++ / MSVC config -------------------------------------------------------
-set(CMAKE_CXX_STANDARD 20)
+# ===== Global settings =====
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Always build UNICODE on Windows, and keep headers lean.
+add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+
+# MSVC niceties: UTF-8 source, strict mode, warnings
 if (MSVC)
-  add_compile_options(
-    /W4             # high warnings
-    /permissive-    # strict mode
-    /Zc:preprocessor
-    /EHsc           # C++ exceptions
-    /utf-8          # source files are UTF-8
-    /DUNICODE /D_UNICODE
-    /DWIN32_LEAN_AND_MEAN
-    /D_CRT_SECURE_NO_WARNINGS
-  )
+  add_compile_options(/permissive- /W4 /Zc:__cplusplus /utf-8)
+  # Optional: treat warnings as errors in CI
+  # add_compile_options(/WX)
 endif()
 
-# Place binaries in a clean tree: build/<config>/
-# (CMake Tools usually sets this; keeping for consistency)
-if (NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
-  set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
-endif()
-
-# --- Includes ----------------------------------------------------------------
-# We keep headers in ./include
+# Where headers live
 include_directories(${CMAKE_SOURCE_DIR}/include)
 
-# --- Common library (logging, DPAPI, IPC, WFP, routing, VPN handlers) --------
+# ===== Source lists =====
 set(VPN_COMMON_SOURCES
-  src/common/log.cpp
-  src/security/dpapi.cpp
-  src/ipc/pipe_server.cpp
-  src/net/wfp_manager.cpp
-  src/net/route_dns.cpp
-  src/vpn/wireguard_handler.cpp
-  src/vpn/openvpn_handler.cpp
+    src/common/log.cpp
+    src/net/wfp_manager.cpp
+    src/net/route_dns.cpp
+    src/ipc/pipe_server.cpp
 )
 
-add_library(vpn_common ${VPN_COMMON_SOURCES})
+set(SERVICE_SOURCES
+    src/service/service.cpp
+)
+
+# The service has a WIN32 GUI-subsystem entry in service_main.cpp (wWinMain → StartServiceCtrlDispatcherW)
+set(SERVICE_WINMAIN
+    src/service/service_main.cpp
+)
+
+# Console/dev runner that calls into svc::run() directly – no SCM.
+set(SERVICE_CONSOLE_MAIN
+    src/service/console_main.cpp
+)
+
+# Tools
+set(VPNCTL_SOURCES
+    tools/vpnctl.cpp
+)
+
+set(SVCCTL_SOURCES
+    tools/svcctl.cpp
+)
+
+# ===== Static library with shared code =====
+add_library(vpn_common STATIC ${VPN_COMMON_SOURCES})
 target_include_directories(vpn_common PUBLIC ${CMAKE_SOURCE_DIR}/include)
-
-# Windows libs:
-#  - crypt32   : DPAPI (CryptProtectData etc.)
-#  - fwpuclnt  : WFP user-mode API
-#  - iphlpapi  : routing/DNS helpers
-#  - shell32   : SHGetKnownFolderPath used in resilient logger
 target_link_libraries(vpn_common
-  PRIVATE
-    crypt32.lib
-    fwpuclnt.lib
-    iphlpapi.lib
-    shell32.lib
+  PUBLIC
+    # Networking + WFP + DNS + services
+    fwpuclnt      # WFP (Windows Filtering Platform)
+    iphlpapi      # IP helper (routes, adapters, DNS)
+    ws2_32        # Winsock
+    advapi32      # Service / registry helpers if needed by common
 )
 
-# --- Windows Service executable ----------------------------------------------
-add_executable(vpn_service
-  src/service/service.cpp
-  src/service/service_main.cpp
+# ===== Windows Service (real SCM-managed binary, WIN32 subsystem) =====
+add_executable(vpn_service WIN32
+  ${SERVICE_SOURCES}
+  ${SERVICE_WINMAIN}
+)
+target_link_libraries(vpn_service PRIVATE vpn_common advapi32)
+
+# Optional, makes the .exe friendlier to the debugger symbols
+set_target_properties(vpn_service PROPERTIES
+  OUTPUT_NAME "vpn_service"
 )
 
-# advapi32: Service Control Manager APIs
-target_link_libraries(vpn_service PRIVATE vpn_common advapi32.lib)
+# ===== Console variant for development =====
+add_executable(vpn_service_console
+  ${SERVICE_SOURCES}
+  ${SERVICE_CONSOLE_MAIN}
+)
+target_link_libraries(vpn_service_console PRIVATE vpn_common)
 
-# --- Optional: console-only entry (dev/debug convenience) --------------------
-# This lets you run the service loop without the SCM.
-if (EXISTS "${CMAKE_SOURCE_DIR}/src/service/console_main.cpp")
-      add_executable(vpn_service_console
-      src/service/console_main.cpp
-      src/service/service.cpp        # <-- add this so svc::run() is linked
-    )
-    target_link_libraries(vpn_service_console PRIVATE vpn_common)
-endif()
+set_target_properties(vpn_service_console PROPERTIES
+  OUTPUT_NAME "vpn_service_console"
+)
 
-# --- Tools -------------------------------------------------------------------
-# Service installer/remover helper (install/uninstall/start/stop via SCM later if extended)
-add_executable(svcctl tools/svcctl.cpp)
-target_link_libraries(svcctl PRIVATE advapi32.lib)
+# ===== Tools =====
+add_executable(vpnctl ${VPNCTL_SOURCES})
+target_link_libraries(vpnctl PRIVATE vpn_common)
 
-# Tiny pipe test client
-if (EXISTS "${CMAKE_SOURCE_DIR}/tools/vpnctl.cpp")
-  add_executable(vpnctl tools/vpnctl.cpp)
-endif()
+add_executable(svcctl ${SVCCTL_SOURCES})
+target_link_libraries(svcctl PRIVATE vpn_common advapi32)
 
-# --- Nice-to-have: show a summary -------------------------------------------
-message(STATUS "==== Build Summary ====")
-message(STATUS "Generator:       ${CMAKE_GENERATOR}")
-message(STATUS "Build type:      ${CMAKE_BUILD_TYPE}")
-message(STATUS "C++ standard:    ${CMAKE_CXX_STANDARD}")
-message(STATUS "Source dir:      ${CMAKE_SOURCE_DIR}")
-message(STATUS "Binary dir:      ${CMAKE_BINARY_DIR}")
-message(STATUS "======================")
+# ===== Nice MSVC folder organization (optional) =====
+source_group(TREE ${CMAKE_SOURCE_DIR} FILES
+  ${VPN_COMMON_SOURCES}
+  ${SERVICE_SOURCES}
+  ${SERVICE_WINMAIN}
+  ${SERVICE_CONSOLE_MAIN}
+  ${VPNCTL_SOURCES}
+  ${SVCCTL_SOURCES}
+)
+
+# ===== Output dirs (multi-config friendly) =====
+# CMake will place outputs under out/build/<config> with MSBuild / VS.
+# If you want to force a flat bin/ & lib/ under the build dir, uncomment:
+# foreach(t vpn_common vpn_service vpn_service_console vpnctl svcctl)
+#   set_target_properties(${t} PROPERTIES
+#     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/$<CONFIG>"
+#     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/$<CONFIG>"
+#     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/$<CONFIG>"
+#   )
+# endforeach()

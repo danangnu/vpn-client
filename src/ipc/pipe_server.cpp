@@ -2,6 +2,9 @@
 #include "common/log.hpp"
 #include <Windows.h>
 #include <vector>
+#include <sddl.h>   // ConvertStringSecurityDescriptorToSecurityDescriptorW
+#include <iostream>
+#pragma comment(lib, "Advapi32.lib")
 
 using namespace ipc;
 
@@ -33,14 +36,31 @@ void PipeServer::start() {
   running_ = true;
   th_ = std::thread([this] {
     while (running_) {
+      SECURITY_ATTRIBUTES sa{};
+      PSECURITY_DESCRIPTOR psd = nullptr;
+
+      const wchar_t* sddl = L"D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;BU)";
+      if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, SDDL_REVISION_1, &psd, nullptr)) {
+        psd = nullptr; // fallback: default DACL (not ideal)
+      }
+      sa.nLength = sizeof(sa);
+      sa.bInheritHandle = FALSE;
+      sa.lpSecurityDescriptor = psd;
+
       HANDLE hPipe = CreateNamedPipeW(
         pipeName_.c_str(),
         PIPE_ACCESS_DUPLEX,
         PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-        8, 64 * 1024, 64 * 1024, 0, nullptr);
+        8, 64 * 1024, 64 * 1024, 0,
+        psd ? &sa : nullptr);  // <-- pass SA when available
 
       if (hPipe == INVALID_HANDLE_VALUE) {
-        logx::error(L"CreateNamedPipe failed");
+        DWORD e = GetLastError();
+        wchar_t msg[256];
+        swprintf(msg, 256, L"CreateNamedPipe failed, err=%lu\n", e);
+        OutputDebugStringW(msg);
+        std::wcerr << msg;
+        if (psd) LocalFree(psd);
         break;
       }
 
@@ -61,6 +81,7 @@ void PipeServer::start() {
       FlushFileBuffers(hPipe);
       DisconnectNamedPipe(hPipe);
       CloseHandle(hPipe);
+      if (psd) LocalFree(psd);
     }
   });
 }
